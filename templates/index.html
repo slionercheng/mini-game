@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="format-detection" content="telephone=no">
+    <title>五子棋 - 在线对战</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>五子棋 - 在线对战</h1>
+        
+        <div id="welcome-screen">
+            <div class="form-group">
+                <label for="player-name">您的昵称:</label>
+                <input type="text" id="player-name" placeholder="请输入昵称">
+            </div>
+            <div class="button-group">
+                <button id="create-room-btn">创建房间</button>
+                <div class="join-room-container">
+                    <input type="text" id="room-id-input" placeholder="输入房间ID">
+                    <button id="join-room-btn">加入房间</button>
+                </div>
+            </div>
+            
+            <div class="room-list-container">
+                <h3>当前可用房间</h3>
+                <button id="refresh-rooms-btn">刷新房间列表</button>
+                <div id="room-list">
+                    <p class="loading-text">加载中...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div id="game-screen" style="display: none;">
+            <div class="game-info">
+                <div id="room-info">房间ID: <span id="room-id-display"></span></div>
+                <div id="player-info">
+                    <div id="player-role"></div>
+                    <div id="current-turn"></div>
+                </div>
+                <div id="game-status"></div>
+            </div>
+            
+            <canvas id="game-board" width="600" height="600"></canvas>
+            
+            <div class="game-controls">
+                <button id="restart-btn" style="display: none;">重新开始</button>
+                <button id="undo-btn">悔棋</button>
+                <button id="leave-room-btn">离开房间</button>
+                
+                <div id="undo-confirmation" style="display: none;" class="confirmation-controls">
+                    <p id="undo-message"></p>
+                    <button id="approve-undo-btn">同意</button>
+                    <button id="reject-undo-btn">拒绝</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/game.js') }}"></script>
+</body>
+</html>
