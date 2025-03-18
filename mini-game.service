@@ -1,0 +1,12 @@
+[Unit]
+Description=Mini Game Flask Application
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/mini-game
+ExecStart=/usr/bin/python3 app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

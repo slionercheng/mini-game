@@ -32,12 +32,14 @@ def index():
 def get_rooms():
     room_list = []
     for room_id, room in rooms.items():
-        if len(room['players']) < 2:  # 只返回未满的房间
-            room_list.append({
-                'id': room_id,
-                'players': len(room['players']),
-                'created_at': room.get('created_at', '')
-            })
+        # 返回所有房间，不管有多少玩家
+        connected_players = len([p for p_id, p in room['players'].items() if p['connected']])
+        room_list.append({
+            'id': room_id,
+            'players': connected_players,
+            'created_at': room.get('created_at', ''),
+            'status': '可加入' if connected_players < 2 else '已满'
+        })
     return {'rooms': room_list}
 
 @socketio.on('create_room')
@@ -68,26 +70,53 @@ def create_room(data):
 @socketio.on('join_room')
 def handle_join_room(data):
     room_id = data['room_id']
-    if room_id in rooms and len(rooms[room_id]['players']) < 2:
-        join_room(room_id)
-        session['room'] = room_id
-        player_id = str(uuid.uuid4())[:8]
+    if room_id not in rooms:
+        emit('error', {'message': '房间不存在'})
+        return
         
-        # 记录玩家加入时间，用于连接状态跟踪
-        rooms[room_id]['players'][player_id] = {
-            'id': player_id,
-            'name': data.get('name', 'Player 2'),
-            'role': 2,
-            'last_seen': time.time(),
-            'connected': True
-        }
-        session['player_id'] = player_id
-        emit('room_joined', {'room_id': room_id, 'player_id': player_id, 'role': 2})
-        emit('player_joined', {'player_name': data.get('name', 'Player 2')}, room=room_id)
-        # 向新加入的玩家发送当前游戏状态
-        emit('update_board', {'board': rooms[room_id]['board'], 'current_player': rooms[room_id]['current_player']})
-    else:
-        emit('error', {'message': 'Room not found or full'})
+    room = rooms[room_id]
+    
+    # 计算已连接的玩家数量
+    connected_players = [p for p_id, p in room['players'].items() if p['connected']]
+    
+    # 如果房间中已经有两个连接的玩家，则不允许加入
+    if len(connected_players) >= 2:
+        emit('error', {'message': '房间已满，无法加入'})
+        return
+        
+    # 如果房间中有一个玩家，确定新玩家的角色
+    role = 1  # 默认为红方
+    if connected_players:
+        # 如果已经有玩家，选择另一个角色
+        existing_role = connected_players[0]['role']
+        role = 2 if existing_role == 1 else 1
+    
+    join_room(room_id)
+    session['room'] = room_id
+    player_id = str(uuid.uuid4())[:8]
+    
+    # 记录玩家加入时间，用于连接状态跟踪
+    rooms[room_id]['players'][player_id] = {
+        'id': player_id,
+        'name': data.get('name', 'Player ' + str(role)),
+        'role': role,
+        'last_seen': time.time(),
+        'connected': True
+    }
+    
+    # 更新房间最后活动时间
+    room['last_activity'] = time.time()
+    
+    session['player_id'] = player_id
+    emit('room_joined', {'room_id': room_id, 'player_id': player_id, 'role': role})
+    emit('player_joined', {'player_name': data.get('name', 'Player ' + str(role))}, room=room_id)
+    
+    # 向新加入的玩家发送当前游戏状态
+    emit('update_board', {
+        'board': room['board'], 
+        'current_player': room['current_player'],
+        'last_move': room.get('last_move')
+    })
 
 @socketio.on('rejoin_room')
 def handle_rejoin_room(data):
@@ -108,6 +137,9 @@ def handle_rejoin_room(data):
         rooms[room_id]['players'][player_id]['last_seen'] = time.time()
         rooms[room_id]['players'][player_id]['connected'] = True
         
+        # 更新房间最后活动时间
+        rooms[room_id]['last_activity'] = time.time()
+        
         # 发送当前游戏状态
         emit('room_rejoined', {
             'room_id': room_id, 
@@ -115,7 +147,8 @@ def handle_rejoin_room(data):
             'role': rooms[room_id]['players'][player_id]['role'],
             'board': rooms[room_id]['board'],
             'current_player': rooms[room_id]['current_player'],
-            'game_over': rooms[room_id]['game_over']
+            'game_over': rooms[room_id]['game_over'],
+            'last_move': rooms[room_id]['last_move']  # 包含最后一步棋的信息
         })
         
         # 通知房间其他玩家此玩家已重新连接
@@ -235,6 +268,12 @@ def restart_game():
         emit('error', {'message': '玩家不在房间中'})
         return
     
+    # 检查房间中是否有两个玩家
+    connected_players = [p for p_id, p in room['players'].items() if p['connected']]
+    if len(connected_players) < 2:
+        emit('error', {'message': '需要两名玩家才能重新开始游戏'})
+        return
+    
     # 记录请求重新开始的玩家
     player_role = room['players'][player_id]['role']
     player_name = room['players'][player_id]['name']
@@ -252,6 +291,9 @@ def restart_game():
         room['last_move'] = None  # 清除最后一步棋记录
         # 清除重新开始的请求
         room.pop('restart_requested', None)
+        
+        # 更新房间最后活动时间
+        room['last_activity'] = time.time()
         
         # 通知所有玩家游戏已重新开始
         emit('game_restarted', {'current_player': 1}, room=room_id)
@@ -402,12 +444,22 @@ def cleanup_rooms():
     rooms_to_remove = []
     
     for room_id, room in rooms.items():
-        # 检查房间是否过期
-        if 'expire_at' in room and current_time > room['expire_at']:
-            rooms_to_remove.append(room_id)
-            continue
+        # 检查房间中的玩家连接状态
+        connected_players = [p for p_id, p in room['players'].items() if p['connected']]
+        disconnected_players = [p for p_id, p in room['players'].items() if not p['connected']]
+        
+        # 如果所有玩家都已断开连接，检查最后一个玩家的断开时间
+        if not connected_players and disconnected_players:
+            # 找出最后一个断开连接的玩家的时间
+            last_disconnect_time = max(p['last_seen'] for p in disconnected_players)
             
-        # 检查断开连接的玩家
+            # 如果所有玩家都已断开连接超过30秒，则删除房间
+            if current_time - last_disconnect_time > 30:  # 30秒后删除房间
+                rooms_to_remove.append(room_id)
+                continue
+        
+        # 检查断开连接的玩家，但不要过快删除他们
+        # 只在玩家断开连接超过5分钟后才删除
         players_to_remove = []
         for player_id, player in room['players'].items():
             if not player['connected'] and current_time - player['last_seen'] > 300:  # 5分钟未重连

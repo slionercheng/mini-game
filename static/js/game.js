@@ -28,7 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
         playerRole: null,
         board: Array(15).fill().map(() => Array(15).fill(0)),
         currentPlayer: 1,
-        gameOver: false
+        gameOver: false,
+        lastMove: null // 记录最后一步棋的位置
     };
 
     // 棋盘绘制参数
@@ -250,13 +251,28 @@ document.addEventListener('DOMContentLoaded', () => {
             roomPlayers.className = 'room-players';
             roomPlayers.textContent = `玩家数: ${room.players}/2`;
             
+            const roomStatus = document.createElement('div');
+            roomStatus.className = 'room-status';
+            roomStatus.textContent = room.status || (room.players < 2 ? '可加入' : '已满');
+            if (roomStatus.textContent === '已满') {
+                roomStatus.classList.add('room-full');
+            }
+            
             roomInfo.appendChild(roomId);
             roomInfo.appendChild(roomName);
             roomInfo.appendChild(roomPlayers);
+            roomInfo.appendChild(roomStatus);
             
             const joinButton = document.createElement('button');
             joinButton.textContent = '加入';
             joinButton.className = 'join-btn';
+            
+            // 如果房间已满，禁用加入按钮但仍然显示
+            if (room.players >= 2) {
+                joinButton.disabled = true;
+                joinButton.classList.add('disabled');
+                joinButton.title = '房间已满';
+            }
             
             roomItem.appendChild(roomInfo);
             roomItem.appendChild(joinButton);
@@ -275,6 +291,12 @@ document.addEventListener('DOMContentLoaded', () => {
             joinButton.addEventListener('click', (e) => {
                 e.stopPropagation(); // 阻止事件冒泡
                 roomIdInput.value = room.id;
+                
+                // 如果房间已满，则不允许加入
+                if (room.players >= 2) {
+                    alert('房间已满，无法加入');
+                    return;
+                }
                 
                 const playerName = playerNameInput.value.trim();
                 if (!playerName) {
@@ -512,6 +534,21 @@ document.addEventListener('DOMContentLoaded', () => {
         // 先绘制基本棋盘
         drawBoard();
         
+        // 绘制最后一步棋的标记框
+        if (gameState.lastMove) {
+            const margin = gridSize / 2;
+            const x = margin + gameState.lastMove.col * gridSize;
+            const y = margin + gameState.lastMove.row * gridSize;
+            
+            // 绘制方框标记最后一步棋
+            ctx.beginPath();
+            const squareSize = gridSize * 0.5;
+            ctx.rect(x - squareSize / 2, y - squareSize / 2, squareSize, squareSize);
+            ctx.strokeStyle = '#00FF00'; // 使用绿色标记最后一步棋
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+        
         // 如果有有效的悬停位置，绘制悬停标记
         if (hoverPosition.row >= 0 && hoverPosition.col >= 0 && 
             gameState.board[hoverPosition.row][hoverPosition.col] === 0) {
@@ -594,6 +631,12 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('move_made', (data) => {
         gameState.board[data.row][data.col] = data.player;
         gameState.currentPlayer = data.next_player;
+        // 记录最后一步棋的位置
+        gameState.lastMove = {
+            row: data.row,
+            col: data.col,
+            player: data.player
+        };
         
         drawBoardWithHover();
         updateGameInfo();
@@ -620,6 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
         gameState.currentPlayer = data.current_player;
         gameState.gameOver = false;
         gameState.winner = null;
+        gameState.lastMove = null; // 清除最后一步棋的记录
         gameState.statusMessage = '游戏已重新开始！';
         
         // 重绘棋盘
@@ -670,6 +714,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 更新游戏状态
         gameState.currentPlayer = data.current_player;
+        gameState.lastMove = null; // 清除最后一步棋的记录，因为已经撤销
         gameState.statusMessage = `${data.player_name} 的惜棋请求已被同意`;
         
         // 隐藏确认对话框
@@ -739,6 +784,11 @@ document.addEventListener('DOMContentLoaded', () => {
         gameState.board = data.board;
         gameState.currentPlayer = data.current_player;
         gameState.gameOver = data.game_over;
+        
+        // 如果有最后一步棋的信息，更新它
+        if (data.last_move) {
+            gameState.lastMove = data.last_move;
+        }
         
         // 重绘棋盘
         drawBoardWithHover();
